@@ -62,16 +62,10 @@ class Game:
             ghost.return_to_spawn()
 
     def is_on_same_row(self, y):
-        if self.pacman.y - y <= PIXELS_PER_CHAR \
-                and self.pacman.y - y >= -PIXELS_PER_CHAR:
-            return True
-        return False
+        return -PIXELS_PER_CHAR <= self.pacman.y - y <= PIXELS_PER_CHAR
 
     def is_on_same_column(self, x):
-        if self.pacman.x - x <= PIXELS_PER_CHAR \
-                and self.pacman.x -x >= -PIXELS_PER_CHAR:
-            return True
-        return False
+        return -PIXELS_PER_CHAR <= self.pacman.x - x <= PIXELS_PER_CHAR
 
     def is_wall_between(self, x, y):
         if self.is_on_same_row(y):
@@ -80,7 +74,7 @@ class Game:
             else:
                 step = -1
             for x_ in range(int(x), int(self.pacman.x), step):
-                if self.is_on_wall(x_, y):
+                if self.is_wall_pixel(x_, y):
                     return True
             return False
 
@@ -90,7 +84,7 @@ class Game:
             else:
                 step = -1
             for y_ in range(int(y), int(self.pacman.y), step):
-                if self.is_on_wall(x, y_):
+                if self.is_wall_pixel(x, y_):
                     return True
             return False
 
@@ -110,12 +104,12 @@ class Game:
         self.score.value = score
 
     def in_the_middle_char(self, x, y):
-        x_on_center = (x - PIXELS_PER_CHAR/2) % PIXELS_PER_CHAR == 0
-        y_on_center = (y - PIXELS_PER_CHAR/2) % PIXELS_PER_CHAR == 0
+        x_on_center = (x - (PIXELS_PER_CHAR - 1) / 2) % PIXELS_PER_CHAR == 0
+        y_on_center = (y - (PIXELS_PER_CHAR - 1) / 2) % PIXELS_PER_CHAR == 0
         return x_on_center and y_on_center
 
-    def is_on_wall(self, x, y):
-        i, j = screen_to_map(x, y)
+    def is_wall_pixel(self, x, y):
+        i, j = map(round, screen_to_map(x, y))
         try:
             return self.walls[i][j]
         except IndexError:
@@ -128,7 +122,7 @@ class Game:
         walls = []
         ghost_s = []
         points = []
-        walls_file = open("assets/map.txt", "r")
+        walls_file = open("assets/map.txt")
         for line in walls_file:
             row =  []
             char_n = 0
@@ -174,10 +168,10 @@ class Character(games.Animation):
 
     def update(self):
         if self.x < 0:
-            self.x = games.screen.width
+            self.x += games.screen.width
         if self.x > games.screen.width:
-            self.x = 0
-        if self.im_on_wall():
+            self.x -= games.screen.width
+        if self.is_on_wall():
             # снимаем со стены и останавливаем
             self.x -= self.dx
             self.y -= self.dy
@@ -195,7 +189,7 @@ class Character(games.Animation):
                     games.K_UP: (0, -1, 270),
                     games.K_DOWN: (0, 1, 90),
                 } [self.change_direction_key]
-                is_wall_in_desired_direction = self.game.is_on_wall(
+                is_wall_in_desired_direction = self.game.is_wall_pixel(
                     self.x + x_*PIXELS_PER_CHAR,
                     self.y + y_*PIXELS_PER_CHAR
                 )
@@ -204,11 +198,13 @@ class Character(games.Animation):
                     self.move(x_, y_)
                     self.change_direction_key = None
 
-    def im_on_wall(self):
-        return self.game.is_on_wall(self.x + PIXELS_PER_CHAR/2 - 1, self.y) \
-                or self.game.is_on_wall(self.x - PIXELS_PER_CHAR/2, self.y) \
-                or self.game.is_on_wall(self.x, self.y - PIXELS_PER_CHAR/2) \
-                or self.game.is_on_wall(self.x, self.y + PIXELS_PER_CHAR/2 - 1)
+    def is_on_wall(self):
+        # достаточно проверить лишь две противоположных угловых точки
+        for d in (-1, 1):
+            delta = d * (PIXELS_PER_CHAR - 1) / 2
+            if self.game.is_wall_pixel(self.x + delta, self.y + delta):
+                return True
+        return False
 
     def maybe_choose_new_direction(self):
         pass
@@ -249,7 +245,7 @@ class Pacman(Character):
         super().stop()
 
     def maybe_choose_new_direction(self):
-        # сохраняет клавишу, которую нажал пользователь для поворота в
+        # сохраняет клавишу, которую нажал пользователь, для поворота в
         # правильный момент
         for key in (
             games.K_LEFT,
@@ -375,26 +371,6 @@ class DumbGhost(Character):
                 Ghost(self.game, self.x, self.y, color)
         super().update()
 
-    def maybe_choose_new_direction(self):
-        if self.is_pacman_visible():
-            rand = random.randint(1, 100)
-            if rand == 25:
-                self.choose_new_direction()
-
-    def is_pacman_visible(self):
-        return (
-            not self.game.is_wall_between(self.x, self.y)
-            and
-            self.game.looks_towards(self.x, self.y, self.angle))
-
-    def choose_new_direction(self):
-        key_name = [games.K_LEFT, games.K_RIGHT, games.K_UP, games.K_DOWN]
-        key_index = random.randint(0, 3)
-        self.change_direction_key = key_name[key_index]
-
-    def after_on_wall(self):
-        self.choose_new_direction()
-
     def return_to_spawn(self):
         self.destroy()
         for c in self.colors:
@@ -430,15 +406,15 @@ class Point(games.Animation):
         return self._value
 
 
-def screen_to_map(x, y):  # x = 0..458 -> 0..27, 46 –> 3
-    i = round(y / PIXELS_PER_CHAR - 0.5)
-    j = round(x / PIXELS_PER_CHAR - 0.5)
+def screen_to_map(x, y):  # x = 0..458 -> 0..27, 46 -> 3
+    i = (y + 0.5) / PIXELS_PER_CHAR - 0.5
+    j = (x + 0.5) / PIXELS_PER_CHAR - 0.5
     return i, j
 
 
 def map_to_screen(i, j):
-    x = PIXELS_PER_CHAR*(j + 0.5) - 0.5
-    y = PIXELS_PER_CHAR*(i + 0.5) - 0.5
+    x = (j + 0.5) * PIXELS_PER_CHAR - 0.5
+    y = (i + 0.5) * PIXELS_PER_CHAR - 0.5
     return x, y
 
 
